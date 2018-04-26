@@ -1,5 +1,5 @@
 #include<stdio.h>
-#include"internal_operations.h"
+#include"user_functions.h"
 
 u32 func(struct mfs_inode_bitmap* bm){
   u32 i,j,k,answer = 1000;
@@ -24,39 +24,39 @@ u32 func(struct mfs_inode_bitmap* bm){
 }
 
 int main(int argc, char* argv[]){
-
-  // if ((mfs=fopen("file", "r+b"))==NULL) {
-  //     printf("Cannot open file.\n");
-  // }
-  //
-  // struct mfs_group_desc h ={
-  //   .block_bitmap = 4,
-  //   .data_table = 34
-  // };
-  // struct mfs_group_desc m;
-  // struct mfs_group_desc m[2];
-  //
-  // write_block(0, sizeof(struct mfs_group_desc), &h);
-  // read_block(0, 2*sizeof(struct mfs_group_desc), &m);
-  //
-  // printf("%llu %llu\n", h.block_bitmap, h.data_table);
-  // printf("%llu %llu\n", m.block_bitmap, m.data_table);
-  //
-  //
-  // mfs_install();
+  if (argc < 2){
+    printf("mfs: wrong number of arguments\n");
+    return 1;
+  }
+  if (!strcmp(argv[1],"install")){
+    mfs_install();
+  }
   if((mfs = fopen(MFS_FILENAME, "r+b")) == NULL) {
     printf("Cannot open mfs file\n");
     return 1;
   }
-  char path[MFS_FILENAME_LEN] = "kek";
-  char path2[MFS_FILENAME_LEN] = "/";
+
   read_sb();
   read_group_desc_table();
-  // ls(path2,1);
-  create_file(path, FIL);
-  rewrite_sb();
-  rewrite_group_desc_table();
-  fclose(mfs);
+  if (!strcmp(argv[1],"ls")){
+    ls(argc,argv);
+  }
+  if (!strcmp(argv[1],"cd")){
+    cd(argc,argv);
+  }
+  if (!strcmp(argv[1],"mkdir")){
+    mkdir(argc, argv);
+  }
+  if (!strcmp(argv[1],"touch")){
+    touch(argc, argv);
+  }
+  if (!strcmp(argv[1],"put")){
+    put(argc, argv);
+  }
+  if (!strcmp(argv[1],"rm")){
+    rm(argc, argv);
+  }
 
+  fclose(mfs);
   return 0;
 }
