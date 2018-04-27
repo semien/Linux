@@ -25,7 +25,7 @@ struct mfs_super_block {
   u32 inodes_per_group; // inodes in group
   u32 block_size;
   u32 inode_size;
-  u32 last_dir_inode_index; // for uniform distribution of dirs between groups
+  u32 last_dir_group_index; // for uniform distribution of dirs between groups
   time_t wtime; // last writing
   u32 current_inode;
   int state; // READY - 1 or others
@@ -45,11 +45,9 @@ struct mfs_group_desc_table{
 
 struct mfs_inode {
   u32 size; // in bytes
-  time_t a_time; // access time
+  //time_t a_time; // access time
   //time_t m_time; // modification time
   time_t c_time; // creating time
-  time_t d_time; // deletion time
-  //uid_t uid; // user id
   char type; // only two types
   u32 num_blocks; // number of blocks occupied by this file
   u32 parent_inode; // number of parent directory inode

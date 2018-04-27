@@ -9,13 +9,14 @@
 #define READY 1
 #define DIR 'd'
 #define FIL '-'
+#define RECURSIVE 1
+#define SIMPLE 2
 
 const char MFS_FILENAME[10] = "miniFS";
 const u32 MFS_RECS_PER_BLOCK = MFS_BLOCK_SIZE / sizeof(struct mfs_dir_file_rec);
 const u32 MFS_BLOCKS_PER_BLOCK = MFS_BLOCK_SIZE / sizeof(u64);
 struct mfs_super_block sb;
 struct mfs_group_desc_table gdt;
-void* buffer;
 FILE* mfs = NULL;
 
 int read_block(u64 offset, u32 lenght, void* buffer){
@@ -25,7 +26,7 @@ int read_block(u64 offset, u32 lenght, void* buffer){
   };
   if (fread(buffer, lenght, 1, mfs) != 1){
     printf("reading error, offset=%llu, len=%u\n", offset, lenght);
-    return 2;
+    return 1;
   };
   return 0;
 }
@@ -37,10 +38,75 @@ int write_block(u64 offset, u32 lenght, void* buffer){
   };
   if (fwrite(buffer, lenght, 1, mfs) != 1){
     printf("writing error, offset=%llu, len=%u\n", offset, lenght);
-    return 2;
+    return 1;
   };
   fflush(mfs);
   return 0;
+}
+
+int read_inode(u32 inode_index, struct mfs_inode* inode){
+  struct mfs_group_desc desc;
+  u32 group_index = inode_index / sb.inodes_per_group;
+  u32 inode_group_index = inode_index % sb.inodes_per_group;
+  desc = gdt.desc[group_index];
+  u64 offset = desc.inode_table +
+               inode_group_index*((u64)sizeof(struct mfs_inode));
+  if (read_block(offset, (u64)sizeof(struct mfs_inode), inode)){
+    printf("Cannot read %u inode\n", inode_index);
+    return 1;
+  };
+  return 0;
+}
+
+int write_inode(u32 inode_index, struct mfs_inode* inode){
+  struct mfs_group_desc desc;
+  u64 group_index = inode_index / sb.inodes_per_group;
+  u64 inode_group_index = inode_index % sb.inodes_per_group;
+  desc = gdt.desc[group_index];
+  u64 offset = desc.inode_table +
+               inode_group_index*((u64)sizeof(struct mfs_inode));
+  if (write_block(offset, (u64)sizeof(struct mfs_inode), inode)){
+    printf("Cannot write %u inode\n", inode_index);
+    return 1;
+  };
+  return 0;
+}
+
+void print_bm(){
+  u32 z = 0;
+  struct mfs_block_bitmap bbm;
+  for(z = 0; z <MFS_NUM_GROUPS; ++z){
+    read_block(gdt.desc[z].block_bitmap, sizeof(struct mfs_block_bitmap), &bbm);
+    printf("bm[%u] -> %llu\n", z, bbm.bits[0]);
+  }
+}
+void print_bm2(){
+  u32 z = 0;
+  struct mfs_inode_bitmap bbm;
+  for(z = 0; z <MFS_NUM_GROUPS; ++z){
+    read_block(gdt.desc[z].inode_bitmap, sizeof(struct mfs_inode_bitmap), &bbm);
+    printf("bm[%u] -> %llu\n", z, bbm.bits[0]);
+  }
+}
+
+void create_empty_inode(struct mfs_inode* inode, char type){
+  inode->size = 0;
+  inode->num_blocks = 0;
+  memset(inode->blocks, 0, 14*sizeof(u64));
+  inode->c_time = time(NULL);
+  inode->type = type;
+}
+
+int free_block(u64 offset){
+  char block[MFS_BLOCK_SIZE];
+  memset(block, 0, MFS_BLOCK_SIZE);
+  return write_block(offset, MFS_BLOCK_SIZE, &block);
+}
+
+int free_inode(u32 inode_index){
+  struct mfs_inode inode;
+  create_empty_inode(&inode, FIL);
+  return write_inode(inode_index, &inode);
 }
 
 int read_sb(){
@@ -69,28 +135,9 @@ int rewrite_group_desc_table(){
   return write_block(offset, (u64)sizeof(struct mfs_group_desc_table), &gdt);
 }
 
-void create_empty_inode(struct mfs_inode* inode, char type){
-  inode->size = 0;
-  inode->num_blocks = 0;
-  memset(inode->blocks, 0, 14*sizeof(u64));
-  inode->c_time = time(NULL);
-  inode->a_time = inode->c_time;
-  inode->d_time = 0;
-  inode->type = type;
-}
-
-// int read_group_desc(u64 group_index, struct mfs_group_desc* desc){
-//   *desc = gdt.desc[group_index]
-//   if (memcpy(desc, &(gdt.desc[group_index]), (u64)sizeof(struct mfs_group_desc)) == NULL){
-//     printf("Cannot read %llu group descriptor\n", group_index);
-//     return 1;
-//   }
-//   return 0;
-// }
-
 void path_splitter(char* path, char* filename){
   size_t len = strlen(path);
-  int i = len-1;
+  int i = (int)len-1;
   while(path[i] != '/' && i >= 0) --i;
   if (i > 0){
     memcpy(filename, path+i+1, len-i);
@@ -112,41 +159,11 @@ void path_splitter(char* path, char* filename){
   }
 }
 
-int read_inode(u32 inode_index, struct mfs_inode* inode){
-  struct mfs_group_desc desc;
-  u32 group_index = inode_index / sb.inodes_per_group;
-  u32 inode_group_index = inode_index % sb.inodes_per_group;
-  desc = gdt.desc[group_index];
-  u64 offset = desc.inode_table +
-               inode_group_index*((u64)sizeof(struct mfs_inode));
-  if (read_block(offset, (u64)sizeof(struct mfs_inode), inode)){
-    printf("Cannot read %u inode\n", inode_index);
-    return 2;
-  };
-  return 0;
-}
-
-int write_inode(u32 inode_index, struct mfs_inode* inode){
-  struct mfs_group_desc desc;
-  u64 group_index = inode_index / sb.inodes_per_group;
-  u64 inode_group_index = inode_index % sb.inodes_per_group;
-  desc = gdt.desc[group_index];
-  u64 offset = desc.inode_table +
-               inode_group_index*((u64)sizeof(struct mfs_inode));
-  if (write_block(offset, (u64)sizeof(struct mfs_inode), inode)){
-    printf("Cannot write %u inode\n", inode_index);
-    return 2;
-  };
-  return 0;
-}
-
 int get_inode_index_from_dirblock(u64 data_block_offset, char* filename, u32* answer, int deep){
   u32 i = 0;
   int out;
   char data_block[MFS_BLOCK_SIZE];
-  if (read_block(data_block_offset, MFS_BLOCK_SIZE, data_block)){
-    return 2;
-  }
+  if (read_block(data_block_offset, MFS_BLOCK_SIZE, data_block)) return 2;
   if (deep == 1){
     struct mfs_dir_file_rec* recs = (struct mfs_dir_file_rec*)data_block;
     for (i = 0; i < MFS_RECS_PER_BLOCK; ++i){
@@ -177,7 +194,6 @@ int get_inode_index_from_dirblock(u64 data_block_offset, char* filename, u32* an
 }
 
 int get_inode_index_from_dir(struct mfs_inode* dir, u32 dir_inode_index, char* filename, u32* answer){
-  size_t filename_len = strlen(filename);
   u32 i = 0;
   if (!strcmp(filename, "..")){
     *answer = dir->parent_inode;
@@ -217,16 +233,13 @@ int get_inode_index_from_relpath(u32 start_inode, char* path, u32* answer){
   u32 inode_index;
   struct mfs_inode current_inode;
 
-  if (read_inode(start_inode, &current_inode)){
-    return 1;
-  };
+  if (read_inode(start_inode, &current_inode)) return 1;
   inode_index = start_inode;
   while(1){
     if (current_inode.type != DIR){
       path[j-1] = '\0';
       printf("%s not such directory\n", path);
     }
-
     memset(tmp_buffer, 0, sizeof(tmp_buffer));
     for (i = 0; i < MFS_FILENAME_LEN; ++i,++j){
       tmp_buffer[i] = path[j];
@@ -239,16 +252,12 @@ int get_inode_index_from_relpath(u32 start_inode, char* path, u32* answer){
       //printf("%s wrong path\n", path);
       return 1;
     }
-    if (read_inode(inode_index, &current_inode)){
-      return 1;
-    }
+    if (read_inode(inode_index, &current_inode)) return 1;
     if (path[j] == '\0')
       break;
     else
       ++j;
   }
-
-
   *answer = inode_index;
   return 0;
 }
@@ -270,6 +279,7 @@ int print_file_from_block(u64 data_block_offset, int deep){
   u32 i = 0;
   int out;
   char data_block[MFS_BLOCK_SIZE];
+  if (data_block_offset == 0) return 0;
   if (read_block(data_block_offset, MFS_BLOCK_SIZE, data_block)){
     return 1;
   }
@@ -294,31 +304,29 @@ int print_file_from_block(u64 data_block_offset, int deep){
 int print_file_from_inode(u32 inode_index){
   struct mfs_inode inode;
   u32 i = 0;
-  if (read_inode(inode_index, &inode) != 0){
-    return 1;
-  }
+  if (read_inode(inode_index, &inode) != 0) return 1;
   if (inode.num_blocks <= 12){
     for (i = 0; i < inode.num_blocks; ++i){
-      if (print_file_from_block(inode.blocks[i], 1) != 0){
-        return 1;
-      }
+      if (print_file_from_block(inode.blocks[i], 1)) return 1;
     }
     return 0;
   }
   if (inode.num_blocks > 12){
     for (i = 0; i < 12; ++i){
-      if (print_file_from_block(inode.blocks[i], 1) != 0){
-        return 1;
-      }
+      if (print_file_from_block(inode.blocks[i], 1) != 0) return 1;
     }
-    if (print_file_from_block(inode.blocks[12], 2) != 0){
-      return 1;
-    }
+    if (print_file_from_block(inode.blocks[12], 2)) return 1;
   }
   if (inode.num_blocks > 12 + MFS_BLOCKS_PER_BLOCK){
     return print_file_from_block(inode.blocks[13], 3);
   }
   return 0;
+}
+
+int icat(char* path){
+  u32 inode_index;
+  if (get_inode_index_from_path(path, &inode_index)) return 1;
+  return print_file_from_inode(inode_index);
 }
 
 int occupy_free_inode(u32* answer, u32 preferred_group){
@@ -335,7 +343,6 @@ int occupy_free_inode(u32* answer, u32 preferred_group){
       if (j*64 >= MFS_INODES_PER_GROUP) break;
       bits = bm.bits[j];
       for (k = 0; k < 64; ++k){
-        //printf("bit %llu pr %u gr %u j %u k %u\n", bm.bits[0], preferred_group, i, j, k);
         if (j*64 + k >= MFS_INODES_PER_GROUP) break;
         if (!(bits & 1)){
           bits |= 1;
@@ -344,6 +351,7 @@ int occupy_free_inode(u32* answer, u32 preferred_group){
           *answer = i*MFS_INODES_PER_GROUP + j*64 + k;
           --sb.num_free_inodes;
           write_block(gdt.desc[group_index].inode_bitmap, sizeof(struct mfs_inode_bitmap), &bm);
+          free_inode(*answer);
           return 0;
         } else {
           bits >>= 1;
@@ -356,23 +364,31 @@ int occupy_free_inode(u32* answer, u32 preferred_group){
 
 int occupy_free_block(u64* offset, u32 preferred_group){
   u64 i,j,k,group_index,bits;
-  struct mfs_block_bitmap bm;
+  struct mfs_block_bitmap bm,bbm;
   if (sb.num_free_blocks == 0){
     return 1;
   }
+  u32 z =0;
   for (i = preferred_group; i < preferred_group + MFS_NUM_GROUPS; ++i){
     group_index = i % MFS_NUM_GROUPS;
     read_block(gdt.desc[group_index].block_bitmap, sizeof(struct mfs_block_bitmap), &bm);
+      z = 0;
+    for(z = 0; z <MFS_NUM_GROUPS; ++z){
+     read_block(gdt.desc[z].block_bitmap, sizeof(struct mfs_block_bitmap), &bbm);
+    }
     for (j = 0; j < MFS_BLOCKMAP_LL; ++j){
+      if (j*64 >= MFS_BLOCKS_PER_GROUP) break;
       bits = bm.bits[j];
       for (k = 0; k < 64; ++k){
-        if (j*64 + k >= MFS_BLOCKS_PER_GROUP) return 1;
+        if (j*64 + k >= MFS_BLOCKS_PER_GROUP) break;
         if (!(bits & 1)){
           *offset = (j*64 + k)*MFS_BLOCK_SIZE + gdt.desc[group_index].data_table;
           bits |= 1;
           bits <<= k;
           bm.bits[j] |= bits;
           --sb.num_free_blocks;
+          write_block(gdt.desc[group_index].block_bitmap, sizeof(struct mfs_block_bitmap), &bm);
+          free_block(*offset);
           return 0;
         } else {
           bits >>= 1;
@@ -383,9 +399,62 @@ int occupy_free_block(u64* offset, u32 preferred_group){
   return 1;
 }
 
+int free_inode_bm(u32 inode_index){
+  u32 group_index = inode_index / MFS_INODES_PER_GROUP;
+  u32 index = inode_index % MFS_INODES_PER_GROUP;
+  u32 j,k;
+  u64 bits, delta;
+  struct mfs_inode_bitmap bm;
+  if (read_block(gdt.desc[group_index].inode_bitmap, sizeof(struct mfs_inode_bitmap), &bm))
+    return 1;
+  j = index / 64;
+  k = index % 64;
+  bits = bm.bits[j];
+  bits >>= k;
+  if (bits & 1) {
+    delta = 0;
+    delta >>= k;
+    delta = 1;
+    delta <<= k;
+    bm.bits[j] -= delta;
+    ++sb.num_free_inodes;
+    write_block(gdt.desc[group_index].inode_bitmap, sizeof(struct mfs_inode_bitmap), &bm);
+  }
+  return 0;
+}
+
+int free_block_bm(u64 offset){
+  u32 group_index = 0;
+  u32 index;
+  u32 i,j,k;
+  u64 bits, delta;
+  struct mfs_block_bitmap bm;
+  for (i = 0; i < MFS_NUM_BLOCKS; ++i){
+    if (gdt.desc[i].data_table <= offset) ++group_index;
+    else break;
+  }
+  --group_index;
+  index = (u32)((offset-gdt.desc[group_index].data_table) / MFS_BLOCK_SIZE);
+  if (read_block(gdt.desc[group_index].block_bitmap, sizeof(struct mfs_block_bitmap), &bm))
+    return 1;
+  j = index / 64;
+  k = index % 64;
+  bits = bm.bits[j];
+  bits >>= k;
+  if (bits & 1) {
+    delta = 0;
+    delta >>= k;
+    delta = 1;
+    delta <<= k;
+    bm.bits[j] -= delta;
+    ++sb.num_free_blocks;
+    write_block(gdt.desc[group_index].block_bitmap, sizeof(struct mfs_block_bitmap), &bm);
+  }
+  return 0;
+}
+
 int add_dir_rec_to_block(u64 offset, struct mfs_dir_file_rec* rec, int deep){
   u32 i = 0;
-  int out;
   char data_block[MFS_BLOCK_SIZE];
   if (offset == 0){
     return 1;
@@ -412,46 +481,47 @@ int add_dir_rec_to_block(u64 offset, struct mfs_dir_file_rec* rec, int deep){
   }
 }
 
-int add_dir_to_new_block(struct mfs_dir_file_rec* rec, struct mfs_inode* dir){
-  u64 offset,offset1,offset2;
+int add_dir_to_new_block(struct mfs_dir_file_rec* rec, u32 dir_inode_index, struct mfs_inode* dir){
+  u64 offset,offset1;
   u32 block_index = dir->num_blocks;
+  u32 i = 0;
   char data_block[MFS_BLOCK_SIZE];
   memset(data_block, 0, MFS_BLOCK_SIZE);
-  if (occupy_free_block(&offset, rec->inode / MFS_INODES_PER_GROUP))
-    return 1;
+  if (occupy_free_block(&offset, dir_inode_index / MFS_NUM_GROUPS)) return 1;
   struct mfs_dir_file_rec* recs = (struct mfs_dir_file_rec*)data_block;
   recs[0] = *rec;
-  if (write_block(offset, MFS_BLOCK_SIZE, data_block)){
-    return 1;
-  }
+  if (write_block(offset, MFS_BLOCK_SIZE, data_block)) return 1;
   if (block_index < 12){
     dir->blocks[block_index] = offset;
     ++dir->num_blocks;
     return 0;
   }
-  /*if (block_index < 12 + MFS_BLOCKS_PER_BLOCK){
+
+  if (block_index < 12 + MFS_BLOCKS_PER_BLOCK){
     if (dir->blocks[12] == 0){
-      occupy_free_block(&offset1, rec->inode / MFS_INODES_PER_GROUP);
+      if (occupy_free_block(&offset1, rec->inode / MFS_INODES_PER_GROUP)) return 1;
+      dir->blocks[12] = offset1;
     } else {
       offset1 = dir->blocks[12];
     }
+    if (write_block(offset1, MFS_BLOCK_SIZE, data_block)) return 1;
     u64* blocks = (u64*)data_block;
-    blocks[0] = offset;
+    for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
+      if (blocks[i] == 0) blocks[i] = offset;
+    }
     if (write_block(offset1, MFS_BLOCK_SIZE, data_block)){
       return 1;
     }
-    dir->blocks[12] = offset1;
     return 0;
   }
-
+  // too lazy to implement double indirect addressing for directory records
+  /*
   if (dir->blocks[13] == 0){
     occupy_free_block(&offset2, rec->inode / MFS_INODES_PER_GROUP);
   } else {
     offset2 = dir->blocks[13];
   }
   */
-
-
   return 1;
 }
 
@@ -463,9 +533,8 @@ int add_dir_rec(u32 dir_inode_index, char* filename, u32 inode_index){
     return 1;
   }
   rec.inode = inode_index;
-  rec.filename_len = strlen(filename);
+  rec.filename_len = (u32)strlen(filename);
   memcpy(rec.filename, filename, MFS_FILENAME_LEN);
-  printf("add %s\n", rec.filename);
   for(i = 0; i < 12; ++i){
     if (!add_dir_rec_to_block(dir.blocks[i], &rec, 1))
       return 0;
@@ -474,16 +543,54 @@ int add_dir_rec(u32 dir_inode_index, char* filename, u32 inode_index){
     return 0;
   if (!add_dir_rec_to_block(dir.blocks[13], &rec, 3))
     return 0;
-  if (!add_dir_to_new_block(&rec, &dir)){
-    printf("dir %u\n", dir_inode_index);
+  if (!add_dir_to_new_block(&rec, dir_inode_index, &dir)){
     return write_inode(dir_inode_index, &dir);
   }
-
   return 1;
 }
 
-int delete_dir_rec(struct mfs_inode* dir, char* filename){
-  return 0;
+int delete_dir_rec_from_block(u64 offset, char* filename, int deep){
+  u32 i = 0;
+  char data_block[MFS_BLOCK_SIZE];
+  if (offset == 0){
+    return 1;
+  }
+  if (read_block(offset, MFS_BLOCK_SIZE, data_block)){
+    return 1;
+  }
+  if (deep == 1){
+    struct mfs_dir_file_rec* recs = (struct mfs_dir_file_rec*)data_block;
+    for (i = 0; i < MFS_RECS_PER_BLOCK; ++i){
+      if (recs[i].filename_len != 0 && !strcmp(recs[i].filename,filename)){
+        recs[i].filename[0] = '\0';
+        recs[i].filename_len = 0;
+        recs[i].inode = 0;
+        return write_block(offset, MFS_BLOCK_SIZE, data_block);
+      }
+    }
+    return 1;
+  } else {
+    u64* blocks = (u64*)data_block;
+    for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
+      if (!delete_dir_rec_from_block(blocks[i], filename, deep-1)) return 0;
+    }
+    return 1;
+  }
+}
+
+int delete_dir_rec(u32 dir_inode_index, char* filename){
+  u32 i = 0;
+  struct mfs_inode dir;
+  if (read_inode(dir_inode_index, &dir)) return 1;
+  for(i = 0; i < 12; ++i){
+    if (!delete_dir_rec_from_block(dir.blocks[i], filename, 1))
+      return 0;
+  }
+  if (!delete_dir_rec_from_block(dir.blocks[12], filename, 2))
+    return 0;
+  if (!delete_dir_rec_from_block(dir.blocks[13], filename, 3))
+    return 0;
+  return 1;
 }
 
 int add_external_file(char* path_ext, char* dir){
@@ -495,11 +602,56 @@ int add_external_file(char* path_ext, char* dir){
   return 0;
 }
 
+int empty_block(u64 offset, int deep){
+  u32 i = 0;
+  int out;
+  char data_block[MFS_BLOCK_SIZE];
+  if (offset == 0) return 0;
+  if (read_block(offset, MFS_BLOCK_SIZE, data_block)) return 1;
+  if (deep == 1){
+    if (free_block_bm(offset)) return 1;
+  } else {
+    u64* blocks = (u64*)data_block;
+    for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
+      if (blocks[i] == 0){
+        if (free_block_bm(offset)) return 1;
+        return 0;
+      }
+      out = empty_block(blocks[i], deep-1);
+      if (out == 0){
+        continue;
+      } else {
+        return out;
+      }
+    }
+    if (free_block_bm(offset)) return 1;
+  }
+  return 0;
+}
+
+int empty_blocks(struct mfs_inode* inode){
+  u32 i;
+  for (i = 0; i < 12; ++i){
+    if (inode->blocks[i] == 0) return 0;
+    if (empty_block(inode->blocks[i], 1)) return 1;
+  }
+  if (inode->blocks[12] == 0) return 0;
+  if (empty_block(inode->blocks[12], 2)) return 1;
+
+  if (inode->blocks[13] == 0) return 0;
+  if (empty_block(inode->blocks[13], 3)) return 1;
+  return 0;
+}
+
 int create_file(char* path, char type){
   char filename[MFS_FILENAME_LEN];
-  u32 dir_inode_index, group_index, new_node_index;
-  struct mfs_inode dir_inode, new_node;
-  if (!get_inode_index_from_path(path, &new_node_index)){
+  u32 dir_inode_index, group_index = 0, new_inode_index;
+  struct mfs_inode new_inode;
+  if (sb.num_free_inodes == 0) {
+    printf("There is no free memory\n");
+    return 2;
+  }
+  if (!get_inode_index_from_path(path, &new_inode_index)){
     printf("%s File exists\n", path);
     return 1;
   }
@@ -507,23 +659,154 @@ int create_file(char* path, char type){
   if (get_inode_index_from_path(path, &dir_inode_index)){
     return 1;
   }
-  printf("%s %s %u\n",path,filename,dir_inode_index);
   if (type == FIL)
-    group_index = dir_inode_index / MFS_NUM_INODES;
+    group_index = dir_inode_index / MFS_NUM_GROUPS;
   if (type == DIR){
-    group_index = sb.last_dir_inode_index;
-    sb.last_dir_inode_index = (sb.last_dir_inode_index+1)%MFS_NUM_GROUPS;
+    group_index = sb.last_dir_group_index;
+    sb.last_dir_group_index = (sb.last_dir_group_index+1)%MFS_NUM_GROUPS;
   }
-  if (occupy_free_inode(&new_node_index, group_index)){
+  if (occupy_free_inode(&new_inode_index, group_index)){
     return 1;
   }
-  printf("nni %u\n", new_node_index);
-  create_empty_inode(&new_node, type);
-  add_dir_rec(dir_inode_index, filename, new_node_index);
-  if (write_inode(new_node_index, &new_node)){
+  create_empty_inode(&new_inode, type);
+  add_dir_rec(dir_inode_index, filename, new_inode_index);
+  new_inode.parent_inode = dir_inode_index;
+  if (write_inode(new_inode_index, &new_inode)){
     return 1;
   }
   return 0;
+}
+
+int fill_block(FILE* ext_file, u32 inode_index, u64* offset, u32* num_remaining_blocks, int deep){
+  u32 i = 0;
+  int out;
+  char data_block[MFS_BLOCK_SIZE];
+  memset(data_block, 0, MFS_BLOCK_SIZE);
+  if (*num_remaining_blocks == 0) return 0;
+  if (occupy_free_block(offset, inode_index / MFS_INODES_PER_GROUP)) return 1;
+  if (deep == 1){
+    data_block[MFS_BLOCK_SIZE-1]='\0';
+    fread(data_block, 1, MFS_BLOCK_SIZE-1, ext_file);
+    --(*num_remaining_blocks);
+    return write_block(*offset, MFS_BLOCK_SIZE, data_block);
+  } else {
+    u64* blocks = (u64*)data_block;
+    for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
+      out = fill_block(ext_file, inode_index, blocks + i, num_remaining_blocks, deep - 1);
+      if (out == 0) continue;
+      else return out;
+    }
+    return write_block(*offset, MFS_BLOCK_SIZE, data_block);
+  }
+}
+
+u32 blocks_req(u32 num){
+  if (num <= 12) return num;
+  if (num <= 12 + MFS_BLOCKS_PER_BLOCK) return num+1;
+  return num + 2 + ceil((double)(num - 12 - MFS_BLOCKS_PER_BLOCK)/ (double)MFS_BLOCKS_PER_BLOCK);
+}
+
+int fill_file(u32 inode_index, char* external_path){
+  FILE* external_file;
+  u32 i = 0;
+  struct mfs_inode inode;
+  u32 num_blocks;
+  if (read_inode(inode_index, &inode)) return 1;
+  if((external_file = fopen(external_path, "r+b")) == NULL) {
+    printf("Cannot open external file\n");
+    return 1;
+  }
+  fseeko(external_file, 0, SEEK_END);
+  inode.size = (u32)ftell(external_file) + 1;
+  inode.num_blocks = ceil((double)inode.size/ (double)(MFS_BLOCK_SIZE-1));
+  if (blocks_req(inode.num_blocks) > sb.num_free_blocks) {
+    printf("There is not enough memory\n");
+    return 1;
+  }
+  num_blocks = inode.num_blocks;
+  rewind(external_file);
+  if (inode.num_blocks <= 12){
+    for (i = 0; i < inode.num_blocks; ++i){
+      if (fill_block(external_file, inode_index, &(inode.blocks[i]), &num_blocks, 1)) return 1;
+    }
+  }
+  if (inode.num_blocks > 12){
+    for (i = 0; i < 12; ++i){
+      if (fill_block(external_file, inode_index, &(inode.blocks[i]), &num_blocks, 1)) return 1;
+    }
+    if (fill_block(external_file, inode_index, &(inode.blocks[12]), &num_blocks, 2)) return 1;
+  }
+  if (inode.num_blocks > 12 + MFS_BLOCKS_PER_BLOCK){
+    return fill_block(external_file, inode_index, &(inode.blocks[13]), &num_blocks, 3);
+  }
+  return write_inode(inode_index, &inode);
+}
+
+int delete_file_with_inode(u32 inode_index, char* filename, char type){
+  struct mfs_inode inode;
+  u32 dir_inode_index;
+  if (read_inode(inode_index, &inode)) return 1;
+  if (inode.type != type) return 2;
+  dir_inode_index = inode.parent_inode;
+  if (empty_blocks(&inode)) return 1;
+  if (free_inode(inode_index)) return 1;
+  if (free_inode_bm(inode_index)) return 1;
+  if (delete_dir_rec(dir_inode_index, filename)) return 1;
+  return 0;
+}
+
+int delete_file(char* path){
+  u32 inode_index;
+  char filename[MFS_FILENAME_LEN];
+  if (get_inode_index_from_path(path, &inode_index)) return 1;
+  path_splitter(path, filename);
+  return delete_file_with_inode(inode_index, filename, FIL);
+}
+
+int rec_delete_file_with_inode(u32, char*);
+
+int rec_delete_from_block(u64 offset, int deep){
+  u32 i = 0;
+  char data_block[MFS_BLOCK_SIZE];
+  if (offset == 0) return 0;
+  if (read_block(offset, MFS_BLOCK_SIZE, data_block)) return 1;
+  if (deep == 1){
+    struct mfs_dir_file_rec* recs = (struct mfs_dir_file_rec*)data_block;
+    for (i = 0; i < MFS_RECS_PER_BLOCK; ++i){
+      if (recs[i].filename_len != 0){
+        if (rec_delete_file_with_inode(recs[i].inode, recs[i].filename)) return 1;
+      }
+    }
+  } else {
+    u64* blocks = (u64*)data_block;
+    for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
+      if (rec_delete_from_block(blocks[i], deep - 1)) return 1;
+    }
+
+  }
+  return 0;
+}
+
+int rec_delete_file_with_inode(u32 inode_index, char* filename){
+  struct mfs_inode inode;
+  u32 i;
+  if (read_inode(inode_index, &inode)) return 1;
+  if (inode.type == DIR) {
+    for (i = 0; i < 12; ++i){
+      if (rec_delete_from_block(inode.blocks[i], 1)) return 1;
+    }
+    if (rec_delete_from_block(inode.blocks[12], 2)) return 1;
+    if (rec_delete_from_block(inode.blocks[13], 3)) return 1;
+  }
+  return delete_file_with_inode(inode_index, filename, inode.type);
+}
+
+int rec_delete(char* path){
+  u32 inode_index;
+  char filename[MFS_FILENAME_LEN];
+  if (get_inode_index_from_path(path, &inode_index)) return 1;
+  path_splitter(path, filename);
+  return rec_delete_file_with_inode(inode_index, filename);
 }
 
 int ls_from_block(u64 offset, int deep, int mode){
@@ -546,7 +829,9 @@ int ls_from_block(u64 offset, int deep, int mode){
             if (read_inode(recs[i].inode, &inode)){
               return 1;
             }
-            printf("%c %-10s %u\n", inode.type, recs[i].filename, inode.size);
+            struct tm* time;
+            time = localtime(&inode.c_time);
+            printf("%c %-10s %0000u bytes %s\n", inode.type, recs[i].filename, inode.size, asctime(time));
           }
           break;
         case 3:
@@ -612,7 +897,33 @@ int icd(char* dir_path){
     return 1;
   }
   sb.current_inode = dir_inode_index;
-  printf("cd %u\n", dir_inode_index);
+  return 0;
+}
+
+int irm(char* path, int mode){
+  if (mode == SIMPLE){
+    return delete_file(path);
+  }
+  if (mode == RECURSIVE){
+    return rec_delete(path);
+  }
+  return 1;
+}
+
+int iput(char* ext_file, char* path){
+  u32 inode_index;
+  char filename[MFS_FILENAME_LEN];
+  path_splitter(path, filename);
+  if (path[strlen(path)-1] != '/') strcat(path,"/");
+  strcat(path, filename);
+  if (create_file(path, FIL)) return 2;
+  if (path[strlen(path)-1] != '/') strcat(path,"/");
+  strcat(path, filename);
+  if (get_inode_index_from_path(path, &inode_index)) return 1;
+  if (fill_file(inode_index, ext_file)) {
+    delete_file(path);
+    return 2;
+  }
   return 0;
 }
 
@@ -635,7 +946,7 @@ int mfs_install(){
   sb.wtime = 0; // need to change
   sb.current_inode = 0;
   sb.state = READY;
-  sb.last_dir_inode_index = 0;
+  sb.last_dir_group_index = 1;
 
   struct mfs_block_bitmap bbm;
   memset(bbm.bits, 0, MFS_BLOCKMAP_LL*sizeof(u64));
@@ -659,7 +970,7 @@ int mfs_install(){
       offset += sizeof(struct mfs_inode);
     }
     gdt.desc[i].data_table = offset;
-    for (j = 0; j < MFS_INODES_PER_GROUP; ++j){
+    for (j = 0; j < MFS_BLOCKS_PER_GROUP; ++j){
       write_block(offset, MFS_BLOCK_SIZE, tmp_block);
       offset += MFS_BLOCK_SIZE;
     }

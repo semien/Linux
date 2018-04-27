@@ -1,28 +1,6 @@
 #include<stdio.h>
 #include"user_functions.h"
 
-u32 func(struct mfs_inode_bitmap* bm){
-  u32 i,j,k,answer = 1000;
-  u64 bits;
-  for (j = 0; j < 2; ++j){
-    bits = bm->bits[j];
-    for (k = 0; k < 64; ++k){
-      printf("%u %llu\n", j*64 + k, bits );
-      if (j*64 + k >= 66) return 1;
-      if (!(bits & 1)){
-        answer = j*64 + k;
-        bits |= 1;
-        bits <<= k;
-        bm->bits[j] |= bits;
-        return answer;
-      } else {
-        bits >>= 1;
-      }
-    }
-  }
-  return answer;
-}
-
 int main(int argc, char* argv[]){
   if (argc < 2){
     printf("mfs: wrong number of arguments\n");
@@ -37,6 +15,9 @@ int main(int argc, char* argv[]){
   }
 
   read_sb();
+  if (!check_sb()){
+    printf("FS is not installed\n");
+  }
   read_group_desc_table();
   if (!strcmp(argv[1],"ls")){
     ls(argc,argv);
@@ -45,7 +26,7 @@ int main(int argc, char* argv[]){
     cd(argc,argv);
   }
   if (!strcmp(argv[1],"mkdir")){
-    mkdir(argc, argv);
+    makedir(argc, argv);
   }
   if (!strcmp(argv[1],"touch")){
     touch(argc, argv);
@@ -56,7 +37,9 @@ int main(int argc, char* argv[]){
   if (!strcmp(argv[1],"rm")){
     rm(argc, argv);
   }
-
+  if (!strcmp(argv[1],"cat")){
+    cat(argc, argv);
+  }
   fclose(mfs);
   return 0;
 }
