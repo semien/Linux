@@ -2,7 +2,7 @@
 Clumsy implementation of the ext2-like file system.
 ### Launch:
 ```sh
-gcc minifs.c -o mfs
+gcc minifs.c -lm -o mfs
 ./mfs command
 ```
 ### Commands:
