@@ -1,97 +1,120 @@
 #include"internal_operations.h"
 
-void ls(int argc, char* argv[]){
+
+//part = strtok(command," ");
+//
+//// Выделение последующих частей
+//while (part != NULL)
+//{
+//  // Вывод очередной выделенной части
+//  printf("%s\n",part);
+//  // Выделение очередной части строки
+//  part = strtok(NULL," ");
+//}
+
+void ls(){
   char path[2] = ".";
-  if (argc == 2){
+  char* arg2;
+  char* arg3;
+  char* arg4;
+  arg2 = strtok(NULL, " \n");
+  if (arg2 == NULL){
     ils(path, 1);
-  }
-  if (argc == 3){
-    if (!strcmp(argv[2],"-l")){
-      ils(path, 2);
+    return;
+  } else {
+    arg3 = strtok(NULL, " \n");
+    if (arg3 == NULL){
+      if (!strcmp(arg2,"-l")){
+        ils(path, 2);
+        return;
+      }
+      if (!strcmp(arg2,"-i")){
+        ils(path, 3);
+        return ;
+      }
+      ils(arg2, 1);
       return;
-    }
-    if (!strcmp(argv[2],"-i")){
-      ils(path, 3);
-      return ;
-    }
-    ils(argv[2], 1);
-  }
-  if (argc == 4){
-    if (!strcmp(argv[2],"-l")){
-      ils(argv[3], 2);
-      return;
-    }
-    if (!strcmp(argv[2],"-i")){
-      ils(argv[3], 3);
-      return ;
+    } else {
+      arg4 = strtok(NULL, " \n");
+      if (arg4 == NULL){
+        if (!strcmp(arg2,"-l")){
+          ils(arg3, 2);
+          return;
+        }
+        if (!strcmp(arg2,"-i")){
+          ils(arg3, 3);
+          return ;
+        }
+      }
     }
   }
-  if (argc > 4){
-    printf("usage:\nls [-i | -l] [directory]\n");
-  }
+  printf("usage:\nls [-i | -l] [directory]\n");
 }
 
-void cd(int argc, char* argv[]){
+void cd(){
   char path[2] = "/";
-  if (argc == 2){
+  char* arg2;
+  char* arg3;
+  arg2 = strtok(NULL, " \n");
+  if (arg2 == NULL){
     icd(path);
-  }
-  if (argc == 3){
-    if (icd(argv[2])){
-      printf("cd: wrong path\n");
+    rewrite_sb();
+    return;
+  } else {
+    arg3 = strtok(NULL, " \n");
+    if (arg3 == NULL){
+      if (icd(arg2)) printf("cd: wrong path\n");
+      rewrite_sb();
+      return;
     }
   }
-  if (argc > 3){
-    printf("usage:\ncd [directory]\n");
-    return;
-  }
-  rewrite_sb();
+  printf("usage:\ncd [directory]\n");
 }
 
-void makedir(int argc, char* argv[]){
-  int i = 0;
-  if (argc == 2){
-    printf("usage:\nmkdir directory ...\n");
-    return;
-  }
-  for (i = 2; i < argc; ++i){
-    if (create_file(argv[i], DIR)){
-      printf("mkdir: wrong path %s\n", argv[i]);
+void makedir(){
+  char* arg;
+  arg = strtok(NULL," \n");
+  if (arg == NULL) printf("usage:\nmkdir directory ...\n");
+  while (arg){
+    if (create_file(arg, DIR)){
+      printf("mkdir: wrong path %s\n", arg);
     }
     rewrite_sb();
+    arg = strtok(NULL, " \n");
   }
 }
 
-void touch(int argc, char* argv[]){
-  int i = 0;
-  if (argc == 2){
-    printf("usage:\ntouch file ...\n");
-    return;
-  }
-  for (i = 2; i < argc; ++i){
-    if (create_file(argv[i], FIL)){
-      printf("touch: wrong path %s\n", argv[i]);
+void touch(){
+  char* arg;
+  arg = strtok(NULL," \n");
+  if (arg == NULL) printf("usage:\ntouch file ...\n");
+  while (arg){
+    if (create_file(arg, FIL)){
+      printf("mkdir: wrong path %s\n", arg);
     }
     rewrite_sb();
+    arg = strtok(NULL, " \n");
   }
 }
 
-void rm(int argc, char* argv[]){
-  int i = 0, error;
-  if (argc == 2){
+void rm(){
+  char* arg;
+  int error;
+  arg = strtok(NULL, " \n");
+  if (arg == NULL){
     printf("usage:\nrm [-r] file ...\n");
     return;
   }
-  if (!strcmp(argv[2],"-r")){
-    for (i = 3; i < argc; ++i){
-      if (irm(argv[i], RECURSIVE)){
-        printf("rm: wrong path\n");
-      }
+  if (!strcmp(arg,"-r")){
+    arg = strtok(NULL, " \n");
+    while (arg){
+      if (irm(arg, RECURSIVE)) printf("rm: wrong path\n");
       rewrite_sb();
+      arg = strtok(NULL, " \n");
     }
   } else {
-    for (i = 2; i < argc; ++i){
-      error = irm(argv[i], SIMPLE);
+    while (arg) {
+      error = irm(arg, SIMPLE);
       switch (error) {
         case 1:
           printf("rm: wrong path \n");
@@ -103,34 +126,36 @@ void rm(int argc, char* argv[]){
           break;
       }
       rewrite_sb();
+      arg = strtok(NULL, " \n");
     }
   }
 }
 
-void put(int argc, char* argv[]){
-  if (argc != 4){
-    printf("usage:\nput external_file internal\n");
-    return;
-  }
-  if (argc == 4){
-    if (iput(argv[2], argv[3])){
-      printf("put: error\n");
+void put(){
+  char* arg2;
+  char* arg3;
+  arg2 = strtok(NULL, " \n");
+  if(arg2){
+    arg3 = strtok(NULL, " \n");
+    if(arg3){
+      if (iput(arg2, arg3)) printf("put: error\n");
+      rewrite_sb();
+      return;
     }
   }
-  rewrite_sb();
+  printf("usage:\nput external_file internal\n");
 }
 
-void cat(int argc, char* argv[]){
-  u32 i;
-  if (argc == 2){
-    printf("usage:\ncat file ...\n");
-    return;
-  }
-  for (i = 2; i < argc; ++i){
-    if (icat(argv[i])){
-      printf("cat: wrong path %s\n", argv[2]);
+void cat(){
+  char* arg;
+  arg = strtok(NULL," \n");
+  if (arg == NULL) printf("usage:\ncat file ...\n");
+  while (arg){
+    if (icat(arg)){
+      printf("cat: wrong path %s\n", arg);
     } else {
       printf("\n");
     }
+    arg = strtok(NULL, " \n");
   }
 }

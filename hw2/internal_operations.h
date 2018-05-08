@@ -90,11 +90,13 @@ void print_bm2(){
 }
 
 void create_empty_inode(struct mfs_inode* inode, char type){
+  memset(inode, 0, sizeof(struct mfs_inode));
   inode->size = 0;
   inode->num_blocks = 0;
   memset(inode->blocks, 0, 14*sizeof(u64));
   inode->c_time = time(NULL);
   inode->type = type;
+  inode->parent_inode = 0;
 }
 
 int free_block(u64 offset){
@@ -429,7 +431,7 @@ int free_block_bm(u64 offset){
   u32 i,j,k;
   u64 bits, delta;
   struct mfs_block_bitmap bm;
-  for (i = 0; i < MFS_NUM_BLOCKS; ++i){
+  for (i = 0; i < MFS_NUM_GROUPS; ++i){
     if (gdt.desc[i].data_table <= offset) ++group_index;
     else break;
   }
@@ -456,6 +458,7 @@ int free_block_bm(u64 offset){
 int add_dir_rec_to_block(u64 offset, struct mfs_dir_file_rec* rec, int deep){
   u32 i = 0;
   char data_block[MFS_BLOCK_SIZE];
+  memset(data_block, 0, MFS_BLOCK_SIZE);
   if (offset == 0){
     return 1;
   }
@@ -488,15 +491,13 @@ int add_dir_to_new_block(struct mfs_dir_file_rec* rec, u32 dir_inode_index, stru
   char data_block[MFS_BLOCK_SIZE];
   memset(data_block, 0, MFS_BLOCK_SIZE);
   if (occupy_free_block(&offset, dir_inode_index / MFS_NUM_GROUPS)) return 1;
-  struct mfs_dir_file_rec* recs = (struct mfs_dir_file_rec*)data_block;
-  recs[0] = *rec;
+  memcpy(data_block, rec, sizeof(struct mfs_dir_file_rec));
   if (write_block(offset, MFS_BLOCK_SIZE, data_block)) return 1;
   if (block_index < 12){
     dir->blocks[block_index] = offset;
     ++dir->num_blocks;
     return 0;
   }
-
   if (block_index < 12 + MFS_BLOCKS_PER_BLOCK){
     if (dir->blocks[12] == 0){
       if (occupy_free_block(&offset1, rec->inode / MFS_INODES_PER_GROUP)) return 1;
@@ -528,13 +529,14 @@ int add_dir_to_new_block(struct mfs_dir_file_rec* rec, u32 dir_inode_index, stru
 int add_dir_rec(u32 dir_inode_index, char* filename, u32 inode_index){
   u32 i = 0;
   struct mfs_dir_file_rec rec;
+  memset(&rec, 0, sizeof(struct mfs_dir_file_rec));
   struct mfs_inode dir;
   if (read_inode(dir_inode_index, &dir)){
     return 1;
   }
   rec.inode = inode_index;
   rec.filename_len = (u32)strlen(filename);
-  memcpy(rec.filename, filename, MFS_FILENAME_LEN);
+  memcpy(rec.filename, filename, strlen(filename));
   for(i = 0; i < 12; ++i){
     if (!add_dir_rec_to_block(dir.blocks[i], &rec, 1))
       return 0;
@@ -679,6 +681,7 @@ int create_file(char* path, char type){
 
 int fill_block(FILE* ext_file, u32 inode_index, u64* offset, u32* num_remaining_blocks, int deep){
   u32 i = 0;
+  size_t len;
   int out;
   char data_block[MFS_BLOCK_SIZE];
   memset(data_block, 0, MFS_BLOCK_SIZE);
@@ -686,9 +689,9 @@ int fill_block(FILE* ext_file, u32 inode_index, u64* offset, u32* num_remaining_
   if (occupy_free_block(offset, inode_index / MFS_INODES_PER_GROUP)) return 1;
   if (deep == 1){
     data_block[MFS_BLOCK_SIZE-1]='\0';
-    fread(data_block, 1, MFS_BLOCK_SIZE-1, ext_file);
+    len = fread(data_block, 1, MFS_BLOCK_SIZE-1, ext_file);
     --(*num_remaining_blocks);
-    return write_block(*offset, MFS_BLOCK_SIZE, data_block);
+    return write_block(*offset, (u32)len, data_block);
   } else {
     u64* blocks = (u64*)data_block;
     for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
@@ -721,6 +724,7 @@ int fill_file(u32 inode_index, char* external_path){
   inode.num_blocks = ceil((double)inode.size/ (double)(MFS_BLOCK_SIZE-1));
   if (blocks_req(inode.num_blocks) > sb.num_free_blocks) {
     printf("There is not enough memory\n");
+    fclose(external_file);
     return 1;
   }
   num_blocks = inode.num_blocks;
@@ -739,6 +743,7 @@ int fill_file(u32 inode_index, char* external_path){
   if (inode.num_blocks > 12 + MFS_BLOCKS_PER_BLOCK){
     return fill_block(external_file, inode_index, &(inode.blocks[13]), &num_blocks, 3);
   }
+  fclose(external_file);
   return write_inode(inode_index, &inode);
 }
 
@@ -831,7 +836,11 @@ int ls_from_block(u64 offset, int deep, int mode){
             }
             struct tm* time;
             time = localtime(&inode.c_time);
-            printf("%c %-10s %0000u bytes %s\n", inode.type, recs[i].filename, inode.size, asctime(time));
+            if (inode.type == FIL){
+              printf("%c %-10s %8u %s", inode.type, recs[i].filename, inode.size, asctime(time));
+            } else {
+              printf("%c %-10s        - %s", inode.type, recs[i].filename, asctime(time));
+            }
           }
           break;
         case 3:
@@ -861,7 +870,10 @@ void ils(char* dir_path, int mode){
   u32 i = 0;
   struct mfs_inode dir_inode;
   u32 dir_inode_index;
-  if (get_inode_index_from_path(dir_path, &dir_inode_index)) return;
+  if (get_inode_index_from_path(dir_path, &dir_inode_index)) {
+    printf("ls: not such directory\n");
+    return;
+  }
   if (read_inode(dir_inode_index, &dir_inode)) return;
   if (dir_inode.num_blocks <= 12){
     for (i = 0; i < dir_inode.num_blocks; ++i){
@@ -947,7 +959,10 @@ int mfs_install(){
   sb.current_inode = 0;
   sb.state = READY;
   sb.last_dir_group_index = 1;
-
+  
+  fwrite(&sb, sizeof(struct mfs_super_block), 1, mfs);
+  memset(&gdt, 0, sizeof(struct mfs_group_desc_table));
+  fwrite(&gdt, sizeof(struct mfs_group_desc_table), 1, mfs);
   struct mfs_block_bitmap bbm;
   memset(bbm.bits, 0, MFS_BLOCKMAP_LL*sizeof(u64));
   struct mfs_inode_bitmap ibm;
@@ -958,20 +973,20 @@ int mfs_install(){
   memset(tmp_block, 0, MFS_BLOCK_SIZE);
 
   for (i = 0; i < MFS_NUM_GROUPS; ++i){
-    write_block(offset, sizeof(struct mfs_block_bitmap), &bbm);
+    fwrite(&bbm, sizeof(struct mfs_block_bitmap), 1, mfs);
     gdt.desc[i].block_bitmap = offset;
     offset += sizeof(struct mfs_block_bitmap);
-    write_block(offset, sizeof(struct mfs_inode_bitmap), &ibm);
+    fwrite(&ibm, sizeof(struct mfs_inode_bitmap), 1, mfs);
     gdt.desc[i].inode_bitmap = offset;
     offset += sizeof(struct mfs_inode_bitmap);
     gdt.desc[i].inode_table = offset;
     for (j = 0; j < MFS_INODES_PER_GROUP; ++j){
-      write_block(offset, sizeof(struct mfs_inode), &in);
+      fwrite(&in, sizeof(struct mfs_inode), 1, mfs);
       offset += sizeof(struct mfs_inode);
     }
     gdt.desc[i].data_table = offset;
     for (j = 0; j < MFS_BLOCKS_PER_GROUP; ++j){
-      write_block(offset, MFS_BLOCK_SIZE, tmp_block);
+      fwrite(tmp_block, MFS_BLOCK_SIZE, 1, mfs);
       offset += MFS_BLOCK_SIZE;
     }
   }

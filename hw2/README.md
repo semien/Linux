@@ -3,38 +3,39 @@ Clumsy implementation of the ext2-like file system.
 ### Launch:
 ```sh
 gcc minifs.c -lm -o mfs
-./mfs command
+./mfs [-i]
 ```
+-i: initialize empty fs with root directory
 ### Commands:
-+ initialize fs with root directory
-```sh
-./mfs install
-```
 + make directory
 ```sh
-./mfs mkdir directory ...
+mkdir directory ...
 ```
 + create file (although the original function "touch" works a little differently)
 ```sh
-./mfs touch file ...
+touch file ...
 ```
 + change directory
 ```sh
-./mfs cd [directory]
+cd [directory]
 ```
 + list files
 ```sh
-./mfs ls [-l | -r] [directory]
+ls [-l | -r] [directory]
 ```
 + import external files
 ```sh
-./mfs put external_path internal_file_path
+put external_path internal_file_path
 ```
 + delete files
 ```sh
-./mfs rm [-r] file ...
+rm [-r] file ...
 ```
 + write files to standard output sequentially 
 ```sh
-./mfs cat file ...
+cat file ...
+```
++ exit
+```sh
+exit
 ```
