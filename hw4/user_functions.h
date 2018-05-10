@@ -121,15 +121,11 @@ void rm(){
 
 void put(){
   char* arg2;
-  char* arg3;
   arg2 = strtok(NULL, " \n");
   if(arg2){
-    arg3 = strtok(NULL, " \n");
-    if(arg3){
-      if (iput(arg2, arg3)) printf("put: error\n");
-      rewrite_sb();
-      return;
-    }
+    if (iput(arg2)) printf("put: error\n");
+    rewrite_sb();
+    return;
   }
   printf("usage:\nput external_file internal\n");
 }

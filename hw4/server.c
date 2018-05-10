@@ -33,11 +33,13 @@ int daemonize()
   if( pid > 0 ) {
     exit(EXIT_SUCCESS);
   }
-  
+  close(0);
+  close(1);
+  close(2);
   umask(0);
-  //chdir("/");
+//  chdir("/");
   stdin=fopen("/dev/null","r");
-  stdout=fopen("/dev/null","w+");
+  //stdout=fopen("/dev/null","w+");
   stderr=fopen("/dev/null","w+");
   return 0;
 }
@@ -79,17 +81,18 @@ int main(int argc, char* argv[]){
   }
   setvbuf(stdout, final_mes.data, _IOFBF, MFS_BLOCK_SIZE);
   final_mes.is_final = 1;
-  internal_mes.is_final = 0;
   listen(listener,5);
   while(1){
     if ((sock = accept(listener, NULL, NULL)) < 0){
       printf("ERROR accepting\n");
       break;
     }
+    read_sb();
+    internal_mes.is_final = 0;
+    recv(sock, &sb.current_inode, sizeof(u32), 0);
     recv(sock, (void*)command, 1024, 0);
     name = strtok(command," \n");
     bzero((void*)final_mes.data, MFS_BLOCK_SIZE);
-    read_sb();
     if (!check_sb()){
       printf("FS is not installed\n");
       close(sock);
@@ -126,6 +129,7 @@ int main(int argc, char* argv[]){
     }
     fflush(stdout);
     send(sock, &final_mes, sizeof(struct message), 0);
+    send(sock, &sb.current_inode, sizeof(u32), 0);
     close(sock);
   }
   close(listener);

@@ -684,23 +684,22 @@ int create_file(char* path, char type){
   return 0;
 }
 
-int fill_block(FILE* ext_file, u32 inode_index, u64* offset, u32* num_remaining_blocks, int deep){
+int fill_block(u32 inode_index, u64* offset, u32* num_remaining_blocks, int deep){
   u32 i = 0;
-  size_t len;
   int out;
   char data_block[MFS_BLOCK_SIZE];
   memset(data_block, 0, MFS_BLOCK_SIZE);
   if (*num_remaining_blocks == 0) return 0;
   if (occupy_free_block(offset, inode_index / MFS_INODES_PER_GROUP)) return 1;
   if (deep == 1){
-    data_block[MFS_BLOCK_SIZE-1]='\0';
-    len = fread(data_block, 1, MFS_BLOCK_SIZE-1, ext_file);
+    recv(sock, &internal_mes, sizeof(struct message), 0);
+    internal_mes.data[MFS_BLOCK_SIZE-1]='\0';
     --(*num_remaining_blocks);
-    return write_block(*offset, (u32)len, data_block);
+    return write_block(*offset, (u32)strlen(internal_mes.data), internal_mes.data);
   } else {
     u64* blocks = (u64*)data_block;
     for (i = 0; i < MFS_BLOCKS_PER_BLOCK; ++i){
-      out = fill_block(ext_file, inode_index, blocks + i, num_remaining_blocks, deep - 1);
+      out = fill_block(inode_index, blocks + i, num_remaining_blocks, deep - 1);
       if (out == 0) continue;
       else return out;
     }
@@ -714,41 +713,39 @@ u32 blocks_req(u32 num){
   return num + 2 + ceil((double)(num - 12 - MFS_BLOCKS_PER_BLOCK)/ (double)MFS_BLOCKS_PER_BLOCK);
 }
 
-int fill_file(u32 inode_index, char* external_path){
-  FILE* external_file;
+int fill_file(u32 inode_index){
+  u32 size;
   u32 i = 0;
+  int answer = 1;
   struct mfs_inode inode;
   u32 num_blocks;
   if (read_inode(inode_index, &inode)) return 1;
-  if((external_file = fopen(external_path, "r+b")) == NULL) {
-    printf("Cannot open external file\n");
-    return 1;
-  }
-  fseeko(external_file, 0, SEEK_END);
-  inode.size = (u32)ftell(external_file) + 1;
+  recv(sock, &size, sizeof(unsigned int), 0);
+  inode.size = size;
   inode.num_blocks = ceil((double)inode.size/ (double)(MFS_BLOCK_SIZE-1));
   if (blocks_req(inode.num_blocks) > sb.num_free_blocks) {
     printf("There is not enough memory\n");
-    fclose(external_file);
+    answer = 0;
+    send(sock, &answer, sizeof(int), 0);
     return 1;
   }
+  send(sock, &answer, sizeof(int), 0);
   num_blocks = inode.num_blocks;
-  rewind(external_file);
+  
   if (inode.num_blocks <= 12){
     for (i = 0; i < inode.num_blocks; ++i){
-      if (fill_block(external_file, inode_index, &(inode.blocks[i]), &num_blocks, 1)) return 1;
+      if (fill_block(inode_index, &(inode.blocks[i]), &num_blocks, 1)) return 1;
     }
   }
   if (inode.num_blocks > 12){
     for (i = 0; i < 12; ++i){
-      if (fill_block(external_file, inode_index, &(inode.blocks[i]), &num_blocks, 1)) return 1;
+      if (fill_block(inode_index, &(inode.blocks[i]), &num_blocks, 1)) return 1;
     }
-    if (fill_block(external_file, inode_index, &(inode.blocks[12]), &num_blocks, 2)) return 1;
+    if (fill_block(inode_index, &(inode.blocks[12]), &num_blocks, 2)) return 1;
   }
   if (inode.num_blocks > 12 + MFS_BLOCKS_PER_BLOCK){
-    return fill_block(external_file, inode_index, &(inode.blocks[13]), &num_blocks, 3);
+    return fill_block(inode_index, &(inode.blocks[13]), &num_blocks, 3);
   }
-  fclose(external_file);
   return write_inode(inode_index, &inode);
 }
 
@@ -927,7 +924,7 @@ int irm(char* path, int mode){
   return 1;
 }
 
-int iput(char* ext_file, char* path){
+int iput(char* path){
   u32 inode_index;
   char filename[MFS_FILENAME_LEN];
   path_splitter(path, filename);
@@ -937,7 +934,7 @@ int iput(char* ext_file, char* path){
   if (path[strlen(path)-1] != '/') strcat(path,"/");
   strcat(path, filename);
   if (get_inode_index_from_path(path, &inode_index)) return 1;
-  if (fill_file(inode_index, ext_file)) {
+  if (fill_file(inode_index)) {
     delete_file(path);
     return 2;
   }
