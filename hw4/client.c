@@ -7,8 +7,12 @@
 #include <string.h>
 #include <math.h>
 
+#define MFS_BLOCK_SIZE 4096
+#define COMMAND_SIZE 1024
+#define PATH_SIZE 1024
+
 struct message{
-  char data[4096];
+  char data[MFS_BLOCK_SIZE];
   int is_final;
 };
 
@@ -16,16 +20,16 @@ int main(int argc, char* argv[]){
   int sock, port, ans, i, num_blocks;
   unsigned int cur_inode_num = 0, len;
   unsigned int size;
-  char fs_command[1024];
+  char fs_command[COMMAND_SIZE];
   char* util_name;
   char* put_path; // for 'put'
-  char external_path[1024];
+  char external_path[PATH_SIZE];
   struct sockaddr_in serv_addr;
   struct message mes;
   FILE* file;
   bzero(&mes, sizeof(struct message));
-  bzero(fs_command, 1024);
-  bzero(external_path, 1024);
+  bzero(fs_command, COMMAND_SIZE);
+  bzero(external_path, PATH_SIZE);
   bzero((char *) &serv_addr, sizeof(serv_addr));
   port = 3425;
   serv_addr.sin_family = AF_INET;
@@ -33,7 +37,7 @@ int main(int argc, char* argv[]){
   serv_addr.sin_port = htons(port);
   while(1){
     printf(">");
-    if(!fgets(fs_command, 1024, stdin)){
+    if(!fgets(fs_command, COMMAND_SIZE, stdin)){
       printf("command reading error\n");
       continue;
     } else {
@@ -69,17 +73,17 @@ int main(int argc, char* argv[]){
           printf("wrong path\n");
           continue;
         }
-        send(sock, &fs_command, 1024, 0);
+        send(sock, &fs_command, COMMAND_SIZE, 0);
         fseeko(file, 0, SEEK_END);
         size = (unsigned int)ftell(file) + 1;
-        num_blocks = ceil((double)size/ 4095);
+        num_blocks = ceil((double)size/ (MFS_BLOCK_SIZE-1));
         send(sock, &size, sizeof(unsigned int), 0);
         recv(sock, &ans, sizeof(int), 0);
         rewind(file);
         if (ans == 1){
           for (i = 0; i<num_blocks; ++i){
-            len = fread(mes.data, 1, 4095, file);
-            if (len != 4095) mes.data[len] = '\0';
+            len = fread(mes.data, 1, MFS_BLOCK_SIZE-1, file);
+            if (len != MFS_BLOCK_SIZE-1) mes.data[len] = '\0';
             mes.is_final = 0;
             if (i == num_blocks - 1) mes.is_final = 1;
             send(sock, &mes, sizeof(struct message), 0);
@@ -87,10 +91,10 @@ int main(int argc, char* argv[]){
         }
         fclose(file);
       } else {
-        send(sock, fs_command, 1024, 0);
+        send(sock, fs_command, COMMAND_SIZE, 0);
       }
       while(1){
-        bzero(mes.data, 4096);
+        bzero(mes.data, MFS_BLOCK_SIZE);
         recv(sock, (void*)&mes, sizeof(struct message), 0);
         printf("%s", mes.data);
         if (mes.is_final)

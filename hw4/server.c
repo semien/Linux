@@ -9,6 +9,8 @@
 #include <signal.h>
 #include "user_functions.h"
 
+#define COMMAND_SIZE 1024
+
 int daemonize()
 {
   pid_t pid;
@@ -47,7 +49,7 @@ int daemonize()
 
 int main(int argc, char* argv[]){
   int listener, port;
-  char fs_command[1024];
+  char fs_command[COMMAND_SIZE];
   char* util_name;
   struct message final_mes;
   
@@ -56,7 +58,7 @@ int main(int argc, char* argv[]){
   if (argc == 2 && !strcmp(argv[1],"-i")){
     mfs_install();
   }
-  bzero((void*)fs_command, 1024);
+  bzero((void*)fs_command, COMMAND_SIZE);
   bzero(&final_mes, sizeof(struct message));
   bzero(&internal_mes, sizeof(struct message));
   struct sockaddr_in serv_addr;
@@ -93,7 +95,7 @@ int main(int argc, char* argv[]){
     read_sb();
     internal_mes.is_final = 0;
     recv(sock, &sb.current_inode, sizeof(u32), 0);
-    recv(sock, (void*)fs_command, 1024, 0);
+    recv(sock, (void*)fs_command, COMMAND_SIZE, 0);
     util_name = strtok(fs_command," \n");
     bzero((void*)final_mes.data, MFS_BLOCK_SIZE);
     if (!check_sb()){
