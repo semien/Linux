@@ -47,9 +47,8 @@ int daemonize()
 
 int main(int argc, char* argv[]){
   int listener, port;
-  char command[1024];
-  char* name;
-  char bufferout[1024];
+  char fs_command[1024];
+  char* util_name;
   struct message final_mes;
   
   daemonize();
@@ -57,17 +56,14 @@ int main(int argc, char* argv[]){
   if (argc == 2 && !strcmp(argv[1],"-i")){
     mfs_install();
   }
-  if((mfs = fopen(MFS_FILENAME, "r+b")) == NULL) {
-    printf("Cannot open mfs file, maybe fs is not installed\n");
-    return 1;
-  }
-  bzero((void*)command, 1024);
-  bzero((void*)bufferout, 1024);
+  bzero((void*)fs_command, 1024);
   bzero(&final_mes, sizeof(struct message));
   bzero(&internal_mes, sizeof(struct message));
   struct sockaddr_in serv_addr;
   if ((listener = socket(AF_INET, SOCK_STREAM, 0)) < 0){
     printf("ERROR opening socket\n");
+    fclose(stdin);
+    fclose(stderr);
     return 1;
   }
   bzero((char *) &serv_addr, sizeof(serv_addr));
@@ -77,11 +73,18 @@ int main(int argc, char* argv[]){
   serv_addr.sin_port = htons(port);
   if (bind(listener, (struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0){
     printf("ERROR on binding\n");
+    fclose(stdin);
+    fclose(stderr);
     return 1;
   }
   setvbuf(stdout, final_mes.data, _IOFBF, MFS_BLOCK_SIZE);
   final_mes.is_final = 1;
   listen(listener,5);
+  if((mfs = fopen(MFS_FILENAME, "r+b")) == NULL) {
+    printf("Cannot open mfs file, maybe fs is not installed\n");
+    close(listener);
+    return 1;
+  }
   while(1){
     if ((sock = accept(listener, NULL, NULL)) < 0){
       printf("ERROR accepting\n");
@@ -90,8 +93,8 @@ int main(int argc, char* argv[]){
     read_sb();
     internal_mes.is_final = 0;
     recv(sock, &sb.current_inode, sizeof(u32), 0);
-    recv(sock, (void*)command, 1024, 0);
-    name = strtok(command," \n");
+    recv(sock, (void*)fs_command, 1024, 0);
+    util_name = strtok(fs_command," \n");
     bzero((void*)final_mes.data, MFS_BLOCK_SIZE);
     if (!check_sb()){
       printf("FS is not installed\n");
@@ -99,39 +102,43 @@ int main(int argc, char* argv[]){
       break;
     }
     read_group_desc_table();
-    if (!name) {
+    if (!util_name) {
       printf("wrong command\n");
     }
-    if (!strcmp(name,"ls")){
+    if (!strcmp(util_name,"ls")){
       ls();
     }
-    if (!strcmp(name,"cd")){
+    if (!strcmp(util_name,"cd")){
       cd();
     }
-    if (!strcmp(name,"mkdir")){
+    if (!strcmp(util_name,"mkdir")){
       makedir();
     }
-    if (!strcmp(name,"touch")){
+    if (!strcmp(util_name,"touch")){
       touch();
     }
-    if (!strcmp(name,"put")){
+    if (!strcmp(util_name,"put")){
       put();
     }
-    if (!strcmp(name,"rm")){
+    if (!strcmp(util_name,"rm")){
       rm();
     }
-    if (!strcmp(name,"cat")){
+    if (!strcmp(util_name,"cat")){
       cat();
     }
-    if (!strcmp(name,"exit")){
+    if (!strcmp(util_name,"exit")){
       close(sock);
+      util_name = NULL;
       break;
     }
     fflush(stdout);
+    util_name = NULL;
     send(sock, &final_mes, sizeof(struct message), 0);
     send(sock, &sb.current_inode, sizeof(u32), 0);
     close(sock);
   }
+  fclose(stdin);
+  fclose(stderr);
   close(listener);
   fclose(mfs);
   return 0;

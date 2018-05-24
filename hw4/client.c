@@ -16,15 +16,15 @@ int main(int argc, char* argv[]){
   int sock, port, ans, i, num_blocks;
   unsigned int cur_inode_num = 0, len;
   unsigned int size;
-  char command[1024];
-  char* name;
-  char* path;
+  char fs_command[1024];
+  char* util_name;
+  char* put_path; // for 'put'
   char external_path[1024];
   struct sockaddr_in serv_addr;
   struct message mes;
   FILE* file;
   bzero(&mes, sizeof(struct message));
-  bzero(command, 1024);
+  bzero(fs_command, 1024);
   bzero(external_path, 1024);
   bzero((char *) &serv_addr, sizeof(serv_addr));
   port = 3425;
@@ -33,11 +33,14 @@ int main(int argc, char* argv[]){
   serv_addr.sin_port = htons(port);
   while(1){
     printf(">");
-    if(!fgets(command, 1024, stdin)){
+    if(!fgets(fs_command, 1024, stdin)){
       printf("command reading error\n");
       continue;
     } else {
-      if (command[0]=='\0' || command[0]=='\n') continue;
+      if (fs_command[0]=='\0' || fs_command[0]=='\n') continue;
+      if (!strncmp(fs_command, "quit", 4)){
+        return 0;
+      }
       sock = socket(AF_INET, SOCK_STREAM, 0);
       if (connect(sock,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0){
         printf("ERROR connecting\n");
@@ -45,19 +48,19 @@ int main(int argc, char* argv[]){
         break;
       }
       send(sock, &cur_inode_num, sizeof(unsigned int), 0);
-      if (!strncmp(command, "put", 3)){
-        name = strtok(command, " \n");
-        path = strtok(NULL, " \n");
-        if (path){
-          strcpy(external_path, path);
+      if (!strncmp(fs_command, "put", 3)){
+        util_name = strtok(fs_command, " \n");
+        put_path = strtok(NULL, " \n");
+        if (put_path){
+          strcpy(external_path, put_path);
         } else {
           printf("usage:\nput external_file internal\n");
           continue;
         }
-        path = strtok(NULL, " \n");
-        if (path){
-          strcat(name, " ");
-          strcat(name, path);
+        put_path = strtok(NULL, " \n");
+        if (put_path){
+          strcat(util_name, " ");
+          strcat(util_name, put_path);
         } else {
           printf("usage:\nput external_file internal\n");
           continue;
@@ -66,7 +69,7 @@ int main(int argc, char* argv[]){
           printf("wrong path\n");
           continue;
         }
-        send(sock, &command, 1024, 0);
+        send(sock, &fs_command, 1024, 0);
         fseeko(file, 0, SEEK_END);
         size = (unsigned int)ftell(file) + 1;
         num_blocks = ceil((double)size/ 4095);
@@ -84,7 +87,7 @@ int main(int argc, char* argv[]){
         }
         fclose(file);
       } else {
-        send(sock, command, 1024, 0);
+        send(sock, fs_command, 1024, 0);
       }
       while(1){
         bzero(mes.data, 4096);
@@ -93,6 +96,8 @@ int main(int argc, char* argv[]){
         if (mes.is_final)
           break;
       }
+      util_name = NULL;
+      put_path = NULL;
       recv(sock, &cur_inode_num, sizeof(unsigned int), 0);
       close(sock);
     }

@@ -36,7 +36,11 @@ rm [-r] file ...
 ```sh
 cat file ...
 ```
-+ exit
++ finish fs daemon
 ```sh
 exit
+```
++ finish client
+```sh
+quit
 ```
